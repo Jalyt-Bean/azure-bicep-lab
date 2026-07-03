@@ -1,58 +1,50 @@
-@description('Azure region for deployment.')
-param location string = resourceGroup().location
+targetScope = 'resourceGroup'
 
-@description('Globally unique storage account name. Must be 3-24 lowercase letters and numbers.')
+@description('Environment name — used in tagging and naming.')
+@allowed([
+  'dev'
+  'prod'
+])
+param environment string
+
+@description('Azure region for deployment.')
+param location string
+
+@description('Globally unique storage account name.')
 param storageAccountName string
 
-@description('Name of the Azure file share to create.')
-param fileShareName string = 'sharedfiles'
+@description('Name of the file share.')
+param fileShareName string
 
-@description('Quota for the Azure file share in GiB.')
-param fileShareQuota int = 100
+@description('Quota for the file share in GiB.')
+param fileShareQuota int
 
 @description('Storage account SKU.')
-@allowed([
-  'Standard_LRS'
-  'Standard_GRS'
-  'Standard_RAGRS'
-  'Standard_ZRS'
-  'Premium_LRS'
-])
-param storageSku string = 'Standard_LRS'
+param storageSku string
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: storageAccountName
-  location: location
-  sku: {
-    name: storageSku
-  }
-  kind: 'StorageV2'
-  properties: {
-    accessTier: 'Hot'
-    allowBlobPublicAccess: false
-    allowCrossTenantReplication: false
-    allowSharedKeyAccess: true
-    minimumTlsVersion: 'TLS1_2'
-    supportsHttpsTrafficOnly: true
-    publicNetworkAccess: 'Enabled'
+@description('Deployment timestamp — captured automatically.')
+param deploymentTimestamp string = utcNow('yyyy-MM-dd')
+
+var commonTags = {
+  environment: environment
+  managedBy: 'bicep'
+  costCentre: 'IT-Lab'
+  owner: 'stephen.meadowcroft'
+  deployedAt: deploymentTimestamp
+}
+
+module storage 'modules/storage.bicep' = {
+  name: 'storage-deployment'
+  params: {
+    location: location
+    storageAccountName: storageAccountName
+    fileShareName: fileShareName
+    fileShareQuota: fileShareQuota
+    storageSku: storageSku
+    tags: commonTags
   }
 }
 
-resource fileService 'Microsoft.Storage/storageAccounts/fileServices@2023-05-01' = {
-  parent: storageAccount
-  name: 'default'
-}
-
-resource fileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-05-01' = {
-  parent: fileService
-  name: fileShareName
-  properties: {
-    accessTier: 'TransactionOptimized'
-    enabledProtocols: 'SMB'
-    shareQuota: fileShareQuota
-  }
-}
-
-output storageAccountId string = storageAccount.id
-output fileShareId string = fileShare.id
-output storageAccountName string = storageAccount.name
+output storageAccountId string = storage.outputs.storageAccountId
+output storageAccountName string = storage.outputs.storageAccountName
+output fileShareId string = storage.outputs.fileShareId

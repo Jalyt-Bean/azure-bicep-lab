@@ -11,8 +11,30 @@ permissions:
   pull-requests: write
 
 jobs:
-  whatif:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bicep Lint
+        run: az bicep lint --file infra/main.bicep
+
+      - name: Bicep Build
+        run: az bicep build --file infra/main.bicep
+
+  whatif:
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - name: dev
+            resource_group: rg-bicep-lab-dev-uks-01
+          - name: prod
+            resource_group: rg-bicep-lab-prod-uks-01
+    environment: ${{ matrix.environment.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,29 +46,36 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Bicep Lint
-        run: az bicep lint --file infra/main.bicep
-
       - name: What-If
         run: |
           az deployment group what-if \
-            --resource-group rg-bicep-lab-dev-uks-01 \
+            --resource-group ${{ matrix.environment.resource_group }} \
             --template-file infra/main.bicep \
-            --parameters infra/main.bicepparam \
+            --parameters infra/environments/${{ matrix.environment.name }}/main.bicepparam \
             > whatif.txt 2>&1 || true
           cat whatif.txt
 
+      - name: Read whatif output
+        id: whatif-content
+        run: |
+          {
+            echo 'content<<EOF'
+            cat whatif.txt
+            echo EOF
+          } >> $GITHUB_OUTPUT
+
       - name: Post What-If to PR
-        uses: actions/github-script@v7
+        uses: marocchino/sticky-pull-request-comment@v2
         with:
-          script: |
-            const fs = require('fs');
-            const output = fs.readFileSync('whatif.txt', 'utf8');
-            const truncated = output.length > 60000 ? output.substring(0, 60000) + '\n\n[Truncated]' : output;
-            const body = `### Azure What-If Preview\n\n\`\`\`\n${truncated}\n\`\`\``;
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
+          header: whatif-${{ matrix.environment.name }}
+          message: |
+            ### Azure What-If Preview — `${{ matrix.environment.name }}`
+            **Resource group:** `${{ matrix.environment.resource_group }}`
+
+            <details>
+            <summary>Click to expand what-if output</summary>
+
+            <pre>
+            ${{ steps.whatif-content.outputs.content }}
+            </pre>
+            </details>
